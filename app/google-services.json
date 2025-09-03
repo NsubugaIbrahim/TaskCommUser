@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "725114436045",
+    "project_id": "taskcomm-7489c",
+    "storage_bucket": "taskcomm-7489c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:725114436045:android:30b33f7f3bb9849b1a2c84",
+        "android_client_info": {
+          "package_name": "com.example.taskcomm1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDrjmz-xv71paG07QrTRznwQWlFil06ztE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
