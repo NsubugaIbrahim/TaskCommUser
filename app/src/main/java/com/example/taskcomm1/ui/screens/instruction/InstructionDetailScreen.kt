@@ -17,6 +17,14 @@ import com.example.taskcomm1.ui.viewmodels.AuthViewModel
 import com.example.taskcomm1.ui.viewmodels.InstructionViewModel
 import java.text.SimpleDateFormat
 import java.util.*
+import com.example.taskcomm1.data.SupabaseClientProvider
+import io.github.jan.supabase.postgrest.Postgrest
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.platform.LocalContext
+import com.google.firebase.Timestamp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,6 +37,10 @@ fun InstructionDetailScreen(
 ) {
     val currentUser by authViewModel.currentUser.collectAsState()
     val instruction = instructionViewModel.getInstructionById(instructionId)
+    val ctx = LocalContext.current
+    var tasks by remember { mutableStateOf<List<Task>>(emptyList()) }
+    var tasksLoading by remember { mutableStateOf(false) }
+    var tasksError by remember { mutableStateOf<String?>(null) }
     
     var showCreateTaskDialog by remember { mutableStateOf(false) }
     
@@ -63,43 +75,72 @@ fun InstructionDetailScreen(
                     )
                 }
                 
-                // TODO: Add tasks list here when TaskViewModel is implemented
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                    ) {
+                if (tasksLoading) {
+                    item {
                         Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             contentAlignment = Alignment.Center
+                        ) { CircularProgressIndicator() }
+                    }
+                } else if (tasksError != null) {
+                    item {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Icon(
-                                    Icons.Default.ListAlt,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(48.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "No tasks yet",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Tasks will appear here when admin creates them",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            Text(
+                                text = tasksError!!,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(onClick = { /* retry below */ }) {
+                                Text("Retry")
                             }
                         }
+                    }
+                } else if (tasks.isEmpty()) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        Icons.Default.ListAlt,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = "No tasks yet",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "Tasks will appear here when admin creates them",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    items(tasks) { task ->
+                        TaskCard(task = task, onClick = { onNavigateToChat(task.taskId) })
                     }
                 }
             }
@@ -112,6 +153,25 @@ fun InstructionDetailScreen(
             ) {
                 CircularProgressIndicator()
             }
+        }
+    }
+
+    LaunchedEffect(instructionId) {
+        tasksLoading = true
+        tasksError = null
+        try {
+            val client = SupabaseClientProvider.getClient(ctx)
+            val postgrest = client.pluginManager.getPlugin(Postgrest)
+            val rows = withContext(Dispatchers.IO) {
+                postgrest["tasks"].select {
+                    filter { eq("instruction_id", instructionId) }
+                }.decodeList<TaskRow>()
+            }
+            tasks = rows.map { it.toModel() }
+        } catch (e: Exception) {
+            tasksError = e.message ?: "Failed to load tasks"
+        } finally {
+            tasksLoading = false
         }
     }
 }
@@ -245,5 +305,31 @@ fun TaskCard(
             )
         }
     }
+}
+
+@Serializable
+private data class TaskRow(
+    val id: String? = null,
+    @SerialName("instruction_id") val instructionId: String? = null,
+    @SerialName("admin_id") val adminId: String? = null,
+    val title: String? = null,
+    val description: String? = null,
+    val status: String? = null,
+    @SerialName("created_at") val createdAt: String? = null
+) {
+    fun toModel(): Task = Task(
+        taskId = id ?: "",
+        instructionId = instructionId ?: "",
+        adminId = adminId ?: "",
+        title = title ?: "",
+        description = description ?: "",
+        status = status ?: "pending",
+        createdAt = createdAt?.let {
+            try {
+                val odt = java.time.OffsetDateTime.parse(it)
+                Timestamp(java.util.Date.from(odt.toInstant()))
+            } catch (_: Exception) { Timestamp.now() }
+        } ?: Timestamp.now()
+    )
 }
 

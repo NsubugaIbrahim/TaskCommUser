@@ -37,22 +37,26 @@ class ChatViewModel(
     
     fun sendTextMessage(taskId: String, text: String, senderId: String, senderRole: String) {
         viewModelScope.launch {
-            _chatState.value = ChatState.Loading
-            
-            val message = ChatMessage(
+            // Optimistic UI update
+            val optimistic = ChatMessage(
+                messageId = "local-" + System.currentTimeMillis(),
                 taskId = taskId,
                 senderId = senderId,
                 senderRole = senderRole,
                 text = text,
                 fileType = "text"
             )
-            
-            val result = repository.sendMessage(message)
-            
-            _chatState.value = if (result.isSuccess) {
-                ChatState.Success
-            } else {
-                ChatState.Error(result.exceptionOrNull()?.message ?: "Failed to send message")
+            _messages.value = _messages.value + optimistic
+            _chatState.value = ChatState.Success
+
+            val result = repository.sendMessage(
+                optimistic.copy(messageId = "", /* server will assign id */)
+            )
+
+            if (result.isFailure) {
+                // Roll back optimistic message on failure
+                _messages.value = _messages.value.filterNot { it.messageId == optimistic.messageId }
+                _chatState.value = ChatState.Error(result.exceptionOrNull()?.message ?: "Failed to send message")
             }
         }
     }
@@ -66,8 +70,19 @@ class ChatViewModel(
         contentType: String
     ) {
         viewModelScope.launch {
-            _chatState.value = ChatState.Loading
-            
+            _chatState.value = ChatState.Success
+            // Optimistic UI entry
+            val optimistic = ChatMessage(
+                messageId = "local-" + System.currentTimeMillis(),
+                taskId = taskId,
+                senderId = senderId,
+                senderRole = senderRole,
+                text = "File: $fileName",
+                fileType = if (contentType.startsWith("image/")) "image" else "document",
+                fileName = fileName
+            )
+            _messages.value = _messages.value + optimistic
+
             try {
                 val uploadResult = repository.uploadFile(fileName, inputStream, contentType)
                 
@@ -78,27 +93,23 @@ class ChatViewModel(
                         else -> "document"
                     }
                     
-                    val message = ChatMessage(
-                        taskId = taskId,
-                        senderId = senderId,
-                        senderRole = senderRole,
-                        text = "File: $fileName",
-                        mediaUrl = mediaUrl,
-                        fileType = fileType,
-                        fileName = fileName
-                    )
-                    
-                    val sendResult = repository.sendMessage(message)
+                    val message = optimistic.copy(mediaUrl = mediaUrl, fileType = fileType)
+                    val sendResult = repository.sendMessage(message.copy(messageId = ""))
                     
                     _chatState.value = if (sendResult.isSuccess) {
                         ChatState.Success
                     } else {
+                        // rollback
+                        _messages.value = _messages.value.filterNot { it.messageId == optimistic.messageId }
                         ChatState.Error(sendResult.exceptionOrNull()?.message ?: "Failed to send file message")
                     }
                 } else {
+                    // rollback
+                    _messages.value = _messages.value.filterNot { it.messageId == optimistic.messageId }
                     _chatState.value = ChatState.Error(uploadResult.exceptionOrNull()?.message ?: "Failed to upload file")
                 }
             } catch (e: Exception) {
+                _messages.value = _messages.value.filterNot { it.messageId == optimistic.messageId }
                 _chatState.value = ChatState.Error(e.message ?: "Failed to send file message")
             }
         }

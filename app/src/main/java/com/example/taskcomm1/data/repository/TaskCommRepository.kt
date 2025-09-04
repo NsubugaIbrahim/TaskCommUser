@@ -141,13 +141,21 @@ class TaskCommRepository(
     
     // Tasks
     suspend fun createTask(task: Task): Result<String> {
-        val result = firebaseService.createTask(task)
-        if (result.isSuccess) {
-            val taskId = result.getOrNull() ?: ""
-            val updatedTask = task.copy(taskId = taskId)
-            taskDao.insertTask(updatedTask)
+        return try {
+            val client = SupabaseClientProvider.getClient(TaskCommApplication.instance)
+            val postgrest = client.pluginManager.getPlugin(Postgrest)
+            val row = TaskRowInsert(
+                instructionId = task.instructionId,
+                title = task.title,
+                description = task.description,
+                status = task.status
+            )
+            postgrest["tasks"].insert(row)
+            // optional: fetch back id if needed
+            Result.success("")
+        } catch (e: Exception) {
+            Result.failure(e)
         }
-        return result
     }
     
     suspend fun updateTask(task: Task): Result<Unit> {
@@ -159,11 +167,31 @@ class TaskCommRepository(
     }
     
     fun observeTasksByInstructionId(instructionId: String): Flow<List<Task>> {
-        return firebaseService.observeTasksByInstructionId(instructionId)
+        return flow {
+            try {
+                val client = SupabaseClientProvider.getClient(TaskCommApplication.instance)
+                val postgrest = client.pluginManager.getPlugin(Postgrest)
+                val rows = postgrest["tasks"].select {
+                    filter { eq("instruction_id", instructionId) }
+                    order(column = "created_at", order = Order.DESCENDING)
+                }.decodeList<TaskRow>()
+                emit(rows.map { it.toTask() })
+            } catch (_: Exception) {
+                emit(emptyList())
+            }
+        }
     }
     
     suspend fun getTaskById(taskId: String): Task? {
-        return taskDao.getTaskById(taskId)
+        return try {
+            val client = SupabaseClientProvider.getClient(TaskCommApplication.instance)
+            val postgrest = client.pluginManager.getPlugin(Postgrest)
+            val rows = postgrest["tasks"].select {
+                filter { eq("id", taskId) }
+                limit(1)
+            }.decodeList<TaskRow>()
+            rows.firstOrNull()?.toTask()
+        } catch (_: Exception) { null }
     }
     
     suspend fun updateTaskStatus(taskId: String, status: String): Result<Unit> {
@@ -178,17 +206,39 @@ class TaskCommRepository(
     
     // Chat Messages
     suspend fun sendMessage(message: ChatMessage): Result<String> {
-        val result = firebaseService.sendMessage(message)
-        if (result.isSuccess) {
-            val messageId = result.getOrNull() ?: ""
-            val updatedMessage = message.copy(messageId = messageId)
-            chatMessageDao.insertMessage(updatedMessage)
+        return try {
+            val client = SupabaseClientProvider.getClient(TaskCommApplication.instance)
+            val postgrest = client.pluginManager.getPlugin(Postgrest)
+            val row = ChatInsertRow(
+                taskId = message.taskId,
+                senderId = message.senderId,
+                text = message.text,
+                mediaUrl = message.mediaUrl,
+                fileType = message.fileType,
+                fileName = message.fileName,
+                senderRole = message.senderRole
+            )
+            postgrest["chat_messages"].insert(row)
+            Result.success("")
+        } catch (e: Exception) {
+            Result.failure(e)
         }
-        return result
     }
     
     fun observeMessagesByTaskId(taskId: String): Flow<List<ChatMessage>> {
-        return firebaseService.observeMessagesByTaskId(taskId)
+        return flow {
+            try {
+                val client = SupabaseClientProvider.getClient(TaskCommApplication.instance)
+                val postgrest = client.pluginManager.getPlugin(Postgrest)
+                val rows = postgrest["chat_messages"].select {
+                    filter { eq("task_id", taskId) }
+                    order(column = "created_at", order = Order.ASCENDING)
+                }.decodeList<ChatRow>()
+                emit(rows.map { it.toMessage() })
+            } catch (_: Exception) {
+                emit(emptyList())
+            }
+        }
     }
     
     suspend fun getMessageCountByTaskId(taskId: String): Int {
@@ -240,4 +290,69 @@ private fun InstructionRow.toInstruction(): Instruction {
         status = status ?: "pending"
     )
 }
+
+@Serializable
+private data class TaskRow(
+    @SerialName("id") val id: String? = null,
+    @SerialName("instruction_id") val instructionId: String? = null,
+    @SerialName("admin_id") val adminId: String? = null,
+    @SerialName("title") val title: String? = null,
+    @SerialName("description") val description: String? = null,
+    @SerialName("status") val status: String? = null,
+    @SerialName("created_at") val createdAt: String? = null
+)
+
+@Serializable
+private data class TaskRowInsert(
+    @SerialName("instruction_id") val instructionId: String,
+    @SerialName("title") val title: String,
+    @SerialName("description") val description: String,
+    @SerialName("status") val status: String
+)
+
+private fun TaskRow.toTask(): Task = Task(
+    taskId = id ?: "",
+    instructionId = instructionId ?: "",
+    adminId = adminId ?: "",
+    title = title ?: "",
+    description = description ?: "",
+    status = status ?: "pending",
+    createdAt = Timestamp.now()
+)
+
+@Serializable
+private data class ChatRow(
+    @SerialName("id") val id: String? = null,
+    @SerialName("task_id") val taskId: String? = null,
+    @SerialName("sender_id") val senderId: String? = null,
+    @SerialName("sender_role") val senderRole: String? = null,
+    @SerialName("text") val text: String? = null,
+    @SerialName("media_url") val mediaUrl: String? = null,
+    @SerialName("file_type") val fileType: String? = null,
+    @SerialName("file_name") val fileName: String? = null,
+    @SerialName("created_at") val createdAt: String? = null
+)
+
+@Serializable
+private data class ChatInsertRow(
+    @SerialName("task_id") val taskId: String,
+    @SerialName("sender_id") val senderId: String,
+    @SerialName("text") val text: String,
+    @SerialName("media_url") val mediaUrl: String? = null,
+    @SerialName("file_type") val fileType: String = "text",
+    @SerialName("file_name") val fileName: String? = null,
+    @SerialName("sender_role") val senderRole: String
+)
+
+private fun ChatRow.toMessage(): ChatMessage = ChatMessage(
+    messageId = id ?: "",
+    taskId = taskId ?: "",
+    senderRole = senderRole ?: "",
+    senderId = senderId ?: "",
+    text = text ?: "",
+    mediaUrl = mediaUrl,
+    fileType = fileType ?: "text",
+    fileName = fileName,
+    timestamp = Timestamp.now()
+)
 

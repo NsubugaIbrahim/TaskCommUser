@@ -31,6 +31,12 @@ import com.example.taskcomm1.ui.viewmodels.ChatState
 import com.example.taskcomm1.ui.viewmodels.ChatViewModel
 import java.text.SimpleDateFormat
 import java.util.*
+import com.example.taskcomm1.data.SupabaseClientProvider
+import io.github.jan.supabase.postgrest.Postgrest
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,15 +46,37 @@ fun ChatScreen(
     chatViewModel: ChatViewModel,
     onNavigateBack: () -> Unit
 ) {
+    val composableContext = LocalContext.current
     val currentUserId by authViewModel.currentUserId.collectAsState()
     val messages by chatViewModel.messages.collectAsState()
     val chatState by chatViewModel.chatState.collectAsState()
     val listState = rememberLazyListState()
     
     var messageText by remember { mutableStateOf("") }
+    var adminName by remember { mutableStateOf("") }
     
     LaunchedEffect(taskId) {
         chatViewModel.loadMessages(taskId)
+        // Fetch admin name for header from Supabase
+        try {
+            val client = SupabaseClientProvider.getClient(composableContext)
+            val postgrest = client.pluginManager.getPlugin(Postgrest)
+            val task = withContext(Dispatchers.IO) {
+                postgrest["tasks"].select {
+                    filter { eq("id", taskId) }
+                    limit(1)
+                }.decodeList<TaskHeaderRow>()
+            }.firstOrNull()
+            if (task?.adminId != null && task.adminId.isNotBlank()) {
+                val profile = withContext(Dispatchers.IO) {
+                    postgrest["profiles"].select {
+                        filter { eq("id", task.adminId!!) }
+                        limit(1)
+                    }.decodeList<ProfileHeaderRow>()
+                }.firstOrNull()
+                adminName = (profile?.name ?: profile?.email ?: "Admin").trim()
+            }
+        } catch (_: Exception) { }
     }
     
     LaunchedEffect(messages.size) {
@@ -60,7 +88,7 @@ fun ChatScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Task Chat") },
+                title = { Text(if (adminName.isBlank()) "Task Chat" else "Task Chat • " + adminName) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -153,8 +181,8 @@ fun ChatScreen(
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            contentPadding = PaddingValues(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             items(messages) { message ->
                                 MessageBubble(
@@ -170,27 +198,61 @@ fun ChatScreen(
     }
 }
 
+@Serializable
+private data class TaskHeaderRow(
+    val id: String? = null,
+    @SerialName("admin_id") val adminId: String? = null
+)
+
+@Serializable
+private data class ProfileHeaderRow(
+    val id: String? = null,
+    val email: String? = null,
+    val name: String? = null
+)
+
 @Composable
 fun MessageBubble(
     message: ChatMessage,
     isFromCurrentUser: Boolean
 ) {
-    Column(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = if (isFromCurrentUser) Alignment.End else Alignment.Start
+        horizontalArrangement = if (isFromCurrentUser) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.Bottom
     ) {
-        Card(
-            modifier = Modifier.widthIn(max = 280.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (isFromCurrentUser) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant
-                }
-            )
+        if (!isFromCurrentUser) {
+            // simple avatar placeholder
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Chat,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+
+        val bubbleShape = if (isFromCurrentUser) {
+            RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomEnd = 16.dp, bottomStart = 16.dp)
+        } else {
+            RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp)
+        }
+
+        Surface(
+            shape = bubbleShape,
+            color = if (isFromCurrentUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (isFromCurrentUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
         ) {
             Column(
-                modifier = Modifier.padding(12.dp)
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 when (message.fileType) {
                     "image" -> {
@@ -204,46 +266,47 @@ fun MessageBubble(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(200.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                    .clip(RoundedCornerShape(10.dp)),
                                 contentScale = ContentScale.Crop
                             )
+                            Spacer(modifier = Modifier.height(6.dp))
                         }
                     }
                     "document" -> {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 Icons.Default.AttachFile,
                                 contentDescription = null,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = message.fileName ?: "Document",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(message.fileName ?: "Document", style = MaterialTheme.typography.bodyMedium)
                         }
+                        Spacer(modifier = Modifier.height(6.dp))
                     }
                 }
-                
+
                 if (message.text.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(if (message.fileType != "text") 8.dp else 0.dp))
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Row(
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text(
+                            text = message.text + "  ",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(message.timestamp.toDate()),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isFromCurrentUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
-        
-        Spacer(modifier = Modifier.height(4.dp))
-        
-        Text(
-            text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(message.timestamp.toDate()),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+
+        if (isFromCurrentUser) {
+            Spacer(modifier = Modifier.width(8.dp))
+        }
     }
 }
 
@@ -262,33 +325,38 @@ fun ChatInputBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.Bottom
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onAttachFile) {
                 Icon(Icons.Default.AttachFile, contentDescription = "Attach file")
             }
             
-            OutlinedTextField(
+            TextField(
                 value = messageText,
                 onValueChange = onMessageTextChange,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Type a message...") },
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp),
+                placeholder = { Text("Type a message…") },
                 maxLines = 4,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent
+                shape = RoundedCornerShape(24.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent
                 )
             )
             
             Spacer(modifier = Modifier.width(8.dp))
             
-            FloatingActionButton(
+            FilledIconButton(
                 onClick = onSendMessage,
-                modifier = Modifier.size(48.dp),
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
+                shape = RoundedCornerShape(16.dp)
             ) {
                 Icon(Icons.Default.Send, contentDescription = "Send")
             }
