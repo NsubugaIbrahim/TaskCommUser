@@ -44,7 +44,20 @@ fun DashboardScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("TaskComm Dashboard") },
+                title = { 
+                    Column {
+                        Text(
+                            text = "TaskComm",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                        )
+                        Text(
+                            text = "Your Instructions & Tasks",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 actions = {
                     IconButton(onClick = {
                         currentUserId?.let { uid ->
@@ -100,6 +113,39 @@ fun DashboardScreen(
                     }
                 }
                 else -> {
+                    // Statistics Section
+                    if (instructions.isNotEmpty()) {
+                        val pendingCount = instructions.count { it.status == "pending" }
+                        val inProgressCount = instructions.count { it.status == "in_progress" }
+                        val completedCount = instructions.count { it.status == "completed" }
+                        
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            UserStatCard(
+                                title = "Pending",
+                                value = pendingCount.toString(),
+                                color = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            UserStatCard(
+                                title = "In Progress",
+                                value = inProgressCount.toString(),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            UserStatCard(
+                                title = "Completed",
+                                value = completedCount.toString(),
+                                color = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    
                     if (instructions.isEmpty()) {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -140,6 +186,51 @@ fun DashboardScreen(
                             contentPadding = PaddingValues(16.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            // Quick Actions Section
+                            item {
+                                Text(
+                                    text = "Quick Actions",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            }
+                            
+                            item {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { showCreateDialog = true },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("New Instruction")
+                                    }
+                                    OutlinedButton(
+                                        onClick = onNavigateToProfile,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Profile")
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                            }
+                            
+                            // Instructions List
+                            item {
+                                Text(
+                                    text = "Your Instructions (${instructions.size})",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            }
+                            
                             items(instructions) { instruction ->
                                 InstructionCard(
                                     instruction = instruction,
@@ -275,4 +366,36 @@ fun CreateInstructionDialog(
             }
         }
     )
+}
+
+@Composable
+private fun UserStatCard(
+    title: String,
+    value: String,
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(
+            containerColor = color.copy(alpha = 0.1f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                color = color
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
