@@ -85,6 +85,8 @@ fun ChatScreen(
                     }.decodeList<ProfileHeaderRow>()
                 }.firstOrNull()
                 adminName = (profile?.name ?: profile?.email ?: "Admin").trim()
+                if (adminName.isBlank()) adminName = "Admin"
+                android.util.Log.d("UserChatScreen", "Fetched admin name: $adminName for adminId: ${task.adminId}")
             }
         } catch (_: Exception) { }
     }
