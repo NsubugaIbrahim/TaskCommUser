@@ -592,7 +592,11 @@ fun MessageBubble(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(message.timestamp.toDate()),
+                            text = run {
+                                val timestampStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(message.timestamp.toDate())
+                                android.util.Log.d("UserChatScreen", "Displaying timestamp for message ${message.messageId}: $timestampStr (raw: ${message.timestamp.toDate()})")
+                                timestampStr
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = if (isFromCurrentUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
                         )

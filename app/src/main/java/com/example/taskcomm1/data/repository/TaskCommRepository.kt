@@ -236,6 +236,12 @@ class TaskCommRepository(
                         filter { eq("task_id", taskId) }
                         order(column = "created_at", order = Order.ASCENDING)
                     }.decodeList<ChatRow>()
+                    
+                    android.util.Log.d("UserChatRepo", "Fetched ${rows.size} messages for task $taskId")
+                    rows.forEachIndexed { index, row ->
+                        android.util.Log.d("UserChatRepo", "Message $index: id=${row.id}, createdAt=${row.createdAt}, text=${row.text?.take(20)}")
+                    }
+                    
                     emit(rows.map { it.toMessage() })
                 } catch (_: Exception) {
                     emit(emptyList())
@@ -269,6 +275,11 @@ class TaskCommRepository(
                         filter { eq("task_id", taskId) }
                         order(column = "created_at", order = Order.ASCENDING)
                     }.decodeList<ChatRow>()
+                    
+                    android.util.Log.d("UserChatRepo", "Smart polling: Fetched ${rows.size} messages for task $taskId")
+                    rows.forEachIndexed { index, row ->
+                        android.util.Log.d("UserChatRepo", "Smart polling Message $index: id=${row.id}, createdAt=${row.createdAt}, text=${row.text?.take(20)}")
+                    }
                     
                     // Merge server data with local optimistic changes
                     val serverMessages = rows.map { it.toMessage() }
@@ -742,16 +753,19 @@ private data class ChatInsertRow(
 private fun ChatRow.toMessage(): ChatMessage {
     val timestamp = try {
         if (createdAt != null) {
-            // Parse ISO 8601 timestamp from Supabase
-            val formatter = java.time.format.DateTimeFormatter.ISO_INSTANT
-            val instant = java.time.Instant.parse(createdAt)
-            val date = java.util.Date.from(instant)
-            Timestamp(date)
+            android.util.Log.d("UserChatRepo", "Parsing timestamp: $createdAt")
+            // Parse ISO 8601 timestamp from Supabase using OffsetDateTime like admin app
+            val odt = java.time.OffsetDateTime.parse(createdAt)
+            val date = java.util.Date.from(odt.toInstant())
+            val result = Timestamp(date)
+            android.util.Log.d("UserChatRepo", "Parsed timestamp successfully: ${result.toDate()}")
+            result
         } else {
+            android.util.Log.w("UserChatRepo", "CreatedAt is null, using now()")
             Timestamp.now()
         }
     } catch (e: Exception) {
-        android.util.Log.w("UserChatRepo", "Failed to parse timestamp: $createdAt, using now()")
+        android.util.Log.e("UserChatRepo", "Failed to parse timestamp: $createdAt, error: ${e.message}, using now()")
         Timestamp.now()
     }
     
