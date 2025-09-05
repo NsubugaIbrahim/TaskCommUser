@@ -25,7 +25,7 @@ class ChatViewModel(
             _chatState.value = ChatState.Loading
             
             try {
-                repository.observeMessagesByTaskId(taskId).collect { messages ->
+                repository.observeMessagesByTaskIdWithLocalChanges(taskId, _messages.value).collect { messages ->
                     _messages.value = messages
                     _chatState.value = ChatState.Success
                 }
@@ -118,6 +118,93 @@ class ChatViewModel(
     fun clearError() {
         if (_chatState.value is ChatState.Error) {
             _chatState.value = ChatState.Idle
+        }
+    }
+    
+    fun diagnosePermissions(messageId: String) {
+        viewModelScope.launch {
+            try {
+                val diagnostics = repository.diagnosePermissions(messageId)
+                android.util.Log.d("UserChatVM", "Permission Diagnostics for message $messageId:")
+                android.util.Log.d("UserChatVM", diagnostics)
+            } catch (e: Exception) {
+                android.util.Log.e("UserChatVM", "Diagnostic failed: ${e.message}")
+            }
+        }
+    }
+    
+    fun deleteMessage(messageId: String) {
+        viewModelScope.launch {
+            android.util.Log.d("UserChatVM", "Starting delete operation for message: $messageId")
+            
+            // Store original messages for potential rollback
+            val originalMessages = _messages.value.toList()
+            
+            // Optimistic UI update - remove immediately
+            _messages.value = _messages.value.filterNot { it.messageId == messageId }
+            
+            try {
+                val result = repository.deleteMessage(messageId)
+                if (result.isFailure) {
+                    android.util.Log.e("UserChatVM", "Delete operation failed for message: $messageId")
+                    _chatState.value = ChatState.Error(result.exceptionOrNull()?.message ?: "Failed to delete message from server")
+                    // Rollback optimistic update
+                    _messages.value = originalMessages
+                    // Run diagnostics to understand why it failed
+                    diagnosePermissions(messageId)
+                } else {
+                    android.util.Log.d("UserChatVM", "Delete operation successful for message: $messageId")
+                    // Add small delay to ensure Supabase operation is committed
+                    kotlinx.coroutines.delay(500)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("UserChatVM", "Delete operation exception: ${e.message}")
+                _chatState.value = ChatState.Error(e.message ?: "Delete failed")
+                // Rollback optimistic update
+                _messages.value = originalMessages
+                // Run diagnostics to understand why it failed
+                diagnosePermissions(messageId)
+            }
+        }
+    }
+    
+    fun editMessage(messageId: String, newText: String) {
+        viewModelScope.launch {
+            android.util.Log.d("UserChatVM", "Starting edit operation for message: $messageId")
+            android.util.Log.d("UserChatVM", "New text: $newText")
+            
+            // Store original messages for potential rollback
+            val originalMessages = _messages.value.toList()
+            
+            // Optimistic UI update - change text immediately
+            _messages.value = _messages.value.map { message ->
+                if (message.messageId == messageId) {
+                    message.copy(text = newText + " (edited)")
+                } else message
+            }
+            
+            try {
+                val result = repository.editMessage(messageId, newText)
+                if (result.isFailure) {
+                    android.util.Log.e("UserChatVM", "Edit operation failed for message: $messageId")
+                    _chatState.value = ChatState.Error(result.exceptionOrNull()?.message ?: "Failed to edit message on server")
+                    // Rollback optimistic update
+                    _messages.value = originalMessages
+                    // Run diagnostics to understand why it failed
+                    diagnosePermissions(messageId)
+                } else {
+                    android.util.Log.d("UserChatVM", "Edit operation successful for message: $messageId")
+                    // Add small delay to ensure Supabase operation is committed
+                    kotlinx.coroutines.delay(500)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("UserChatVM", "Edit operation exception: ${e.message}")
+                _chatState.value = ChatState.Error(e.message ?: "Edit failed")
+                // Rollback optimistic update
+                _messages.value = originalMessages
+                // Run diagnostics to understand why it failed
+                diagnosePermissions(messageId)
+            }
         }
     }
 }
